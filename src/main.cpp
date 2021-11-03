@@ -3,6 +3,8 @@
 
 void setup() {
   Serial.begin(9600);		//initialisation
+  pinMode(D13, OUTPUT);
+  digitalWrite(D13, LOW);
 }
 
 void loop() {
@@ -17,11 +19,20 @@ void loop() {
   JSONVar jsonRecu = JSON.parse(reception);
   JSONVar jsonReponse;
 
-  double val1 = double(jsonRecu["Rz"]);
 
+  double val1 = double(jsonRecu["Rz"]);
+  if(val1 == 10){
+    digitalWrite(D13, HIGH);
+  }
+  else{
+    digitalWrite(D13, LOW);
+  }
+  jsonReponse["statut"] = true;
   jsonReponse["test"] = "message test";
   jsonReponse["AngleZx2"] = val1 * 2;
   jsonReponse["ValCapteur2"] = 123.456;
+  jsonReponse["time"] = millis();
 
+  delay(100);
   Serial.println(jsonReponse);
 }
