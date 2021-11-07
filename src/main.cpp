@@ -28,7 +28,7 @@ String message;
 bool receiveJson(){
   if (Serial.available()) {
     char c = Serial.read();
-    if (c == '\n') {
+    if (c == '\n' || c == ' '|| c == '\t') {
        return false; 
     }
     if (c == '\r') {
