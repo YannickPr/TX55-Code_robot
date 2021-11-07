@@ -92,7 +92,9 @@ void executJson(JsonObject instruction)
 
 
 void setup() {
-  Serial.begin(115200);		//initialisation
+  Serial.begin(9600);		//initialisation
+  delay(3000);
+  Serial.println("initialisation ok");
 
   motorRotate.setMaxSpeed(200);
   motorLower.setMaxSpeed(200);
@@ -117,7 +119,7 @@ void setup() {
 }
 
 void loop() {
-
+  Serial.println("loop");
   if (!queueJson.isFull()) {            //if the queue is not full
     if (receiveJson()) {    //get one more caracter from serial : is it end of line ?
       Serial.println("ok"); 

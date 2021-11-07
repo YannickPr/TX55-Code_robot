@@ -1,218 +1,174 @@
 #include <Arduino.h>
-#include "pinout.h"
-#include "robotGeometry.h"
-#include "interpolation.h"
-#include "fanControl.h"
-#include "RampsStepper.h"
-#include "queue.h"
-#include "command.h"
-
+#include <ArduinoJson.h>
 #include <Stepper.h>
+#include <AccelStepper.h>
+#include <MultiStepper.h> 
+
+#include "pinout.h"
+#include "queue.h"
+
+AccelStepper motorRotate = AccelStepper(AccelStepper::DRIVER, Z_STEP_PIN, Z_DIR_PIN);
+const float STEP_PER_DEGREE_ROTATION = 32. / 9. * 200 * 16 / 360.;    //big gear: 32, small gear: 9, steps per rev: 200, microsteps: 16
+
+AccelStepper motorLower(AccelStepper::DRIVER, Y_STEP_PIN, Y_DIR_PIN);
+const float STEP_PER_DEGREE_LOWER = 32. / 9. * 200 * 16 / 360.;
+
+AccelStepper motorHigher(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
+const float STEP_PER_DEGREE_HIGHER = 32. / 9. * 200 * 16 / 360.;
+
+AccelStepper motorGripper(AccelStepper::DRIVER, E_STEP_PIN, E_DIR_PIN);
+
+MultiStepper allMotors;
+long positionMotors[4] = {0}; //one per motor
+
+Queue<JsonObject> queueJson(15);
+String message;
 
 
-Stepper stepper(2400, STEPPER_GRIPPER_PIN_0, STEPPER_GRIPPER_PIN_1, STEPPER_GRIPPER_PIN_2, STEPPER_GRIPPER_PIN_3);
-RampsStepper stepperRotate(Z_STEP_PIN, Z_DIR_PIN, Z_ENABLE_PIN);
-RampsStepper stepperLower(Y_STEP_PIN, Y_DIR_PIN, Y_ENABLE_PIN);
-RampsStepper stepperHigher(X_STEP_PIN, X_DIR_PIN, X_ENABLE_PIN);
-RampsStepper stepperExtruder(E_STEP_PIN, E_DIR_PIN, E_ENABLE_PIN);
-FanControl fan(FAN_PIN);
-RobotGeometry geometry;
-Interpolation interpolator;
-Queue<Cmd> queue(15);
-Command command;
-
-
-
-
-void setStepperEnable(bool enable) {
-  stepperRotate.enable(enable);
-  stepperLower.enable(enable);
-  stepperHigher.enable(enable); 
-  stepperExtruder.enable(enable); 
-  fan.enable(enable);
-}
-
-
-
-
-void cmdMove(Cmd (&cmd)) {
-  interpolator.setInterpolation(cmd.valueX, cmd.valueY, cmd.valueZ, cmd.valueE, cmd.valueF);
-}
-
-void cmdDwell(Cmd (&cmd)) {
-  delay(int(cmd.valueT * 1000));
-}
-
-void cmdGripperOn(Cmd (&cmd)) {
-  stepper.setSpeed(5);
-  stepper.step(int(cmd.valueT));
-  delay(50);
-  digitalWrite(STEPPER_GRIPPER_PIN_0, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_1, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_2, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_3, LOW);
-  //printComment("// NOT IMPLEMENTED");
-  //printFault();
-}
-
-void cmdGripperOff(Cmd (&cmd)) {
-  stepper.setSpeed(5);
-  stepper.step(-int(cmd.valueT));
-  delay(50);
-  digitalWrite(STEPPER_GRIPPER_PIN_0, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_1, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_2, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_3, LOW);
-  //printComment("// NOT IMPLEMENTED");
-  //printFault();
-}
-
-void cmdStepperOn() {
-  setStepperEnable(true);
-}
-
-void cmdStepperOff() {
-  setStepperEnable(false);
-}
-
-void cmdFanOn() {
-  fan.enable(true);
-}
-
-void cmdFanOff() {
-  fan.enable(false);
-}
-
-void handleAsErr(Cmd (&cmd)) {
-  printComment("Unknown Cmd " + String(cmd.id) + String(cmd.num) + " (queued)"); 
-  printFault();
-}
-
-void executeCommand(Cmd cmd) {
-  if (cmd.id == -1) {
-    String msg = "parsing Error";
-    printComment(msg);
-    handleAsErr(cmd);
-    return;
-  }
-  
-  if (cmd.valueX == NAN) {
-    cmd.valueX = interpolator.getXPosmm();
-  }
-  if (cmd.valueY == NAN) {
-    cmd.valueY = interpolator.getYPosmm();
-  }
-  if (cmd.valueZ == NAN) {
-    cmd.valueZ = interpolator.getZPosmm();
-  }
-  if (cmd.valueE == NAN) {
-    cmd.valueE = interpolator.getEPosmm();
-  }
-  
-   //decide what to do
-  if (cmd.id == 'G') {
-    switch (cmd.num) {
-      case 0: cmdMove(cmd); break;
-      case 1: cmdMove(cmd); break;
-      case 4: cmdDwell(cmd); break;
-      //case 21: break; //set to mm
-      //case 90: cmdToAbsolute(); break;
-      //case 91: cmdToRelative(); break;
-      //case 92: cmdSetPosition(cmd); break;
-      default: handleAsErr(cmd); 
+bool receiveJson(){
+  if (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+       return false; 
     }
-  } else if (cmd.id == 'M') {
-    switch (cmd.num) {
-      //case 0: cmdEmergencyStop(); break;
-      case 3: cmdGripperOn(cmd); break;
-      case 5: cmdGripperOff(cmd); break;
-      case 17: cmdStepperOn(); break;
-      case 18: cmdStepperOff(); break;
-      case 106: cmdFanOn(); break;
-      case 107: cmdFanOff(); break;
-      default: handleAsErr(cmd); 
+    if (c == '\r') {
+      Serial.print("reception de ");
+      Serial.println(message);
+      //bool b = processMessage(message);
+      StaticJsonDocument<1000> messageJson;
+
+      DeserializationError error = deserializeJson(messageJson, message);
+
+      message = "";
+      // Test if parsing succeeds.
+      if (error) {
+        //JsonObject jsonReponse;
+        //jsonReponse["Statut"] = true;
+        //jsonReponse["Error"] = error.f_str();
+        //Serial.println(jsonReponse);
+        Serial.print(F("deserializeJson() failed: "));
+        Serial.println(error.f_str());
+        return false;
+      }
+      queueJson.push(messageJson.to<JsonObject>());
+
+      return true;
+    } else {
+       message += c; 
     }
-  } else {
-    handleAsErr(cmd); 
-  }
+  }  
+  return false;
 }
 
 
-void setup_old() {
-  Serial.begin(9600);
-  
-  //various pins..
-  pinMode(HEATER_0_PIN  , OUTPUT);
-  pinMode(HEATER_1_PIN  , OUTPUT);
-  pinMode(LED_PIN       , OUTPUT);
-  
-  //unused Stepper..
-  pinMode(E_STEP_PIN   , OUTPUT);
-  pinMode(E_DIR_PIN    , OUTPUT);
-  pinMode(E_ENABLE_PIN , OUTPUT);
-  
-  //unused Stepper..
-  pinMode(Q_STEP_PIN   , OUTPUT);
-  pinMode(Q_DIR_PIN    , OUTPUT);
-  pinMode(Q_ENABLE_PIN , OUTPUT);
-  
-  //GripperPins
-  pinMode(STEPPER_GRIPPER_PIN_0, OUTPUT);
-  pinMode(STEPPER_GRIPPER_PIN_1, OUTPUT);
-  pinMode(STEPPER_GRIPPER_PIN_2, OUTPUT);
-  pinMode(STEPPER_GRIPPER_PIN_3, OUTPUT);
-  digitalWrite(STEPPER_GRIPPER_PIN_0, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_1, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_2, LOW);
-  digitalWrite(STEPPER_GRIPPER_PIN_3, LOW);
-
-  
-  //reduction of steppers..
-  stepperHigher.setReductionRatio(32.0 / 9.0, 200 * 16);  //big gear: 32, small gear: 9, steps per rev: 200, microsteps: 16
-  stepperLower.setReductionRatio( 32.0 / 9.0, 200 * 16);
-  stepperRotate.setReductionRatio(32.0 / 9.0, 200 * 16);
-  stepperExtruder.setReductionRatio(32.0 / 9.0, 200 * 16);
-  
-  //start positions..
-  stepperHigher.setPositionRad(PI / 2.0);  //90°
-  stepperLower.setPositionRad(0);          // 0°
-  stepperRotate.setPositionRad(0);         // 0°
-  stepperExtruder.setPositionRad(0);
-  
-  //enable and init..
-  setStepperEnable(false);
-  interpolator.setInterpolation(0,120,120,0, 0,120,120,0);
-  
-  Serial.println("start");
-}
-
-
-void loop_old () {
-  //update and Calculate all Positions, Geometry and Drive all Motors...
-  interpolator.updateActualPosition();
-  geometry.set(interpolator.getXPosmm(), interpolator.getYPosmm(), interpolator.getZPosmm());
-  stepperRotate.stepToPositionRad(geometry.getRotRad());
-  stepperLower.stepToPositionRad (geometry.getLowRad());
-  stepperHigher.stepToPositionRad(geometry.getHighRad());
-  stepperExtruder.stepToPositionRad(interpolator.getEPosmm());
-  stepperRotate.update();
-  stepperLower.update();
-  stepperHigher.update(); 
-  fan.update();
-  
-  if (!queue.isFull()) {
-    if (command.handleGcode()) {
-      queue.push(command.getCmd());
-      printOk();
-    }
-  }
-  if ((!queue.isEmpty()) && interpolator.isFinished()) {
-    executeCommand(queue.pop());
-  }
+void executJson(JsonObject instruction)
+{
+  if(instruction.containsKey("SpeedMax")){
+    int speed = instruction["SpeedMax"].as<int>();
+    Serial.print("detection de speed : ");
+    Serial.println(speed);
     
-  if (millis() %500 <250) {
-    digitalWrite(LED_PIN, HIGH);
-  } else {
-    digitalWrite(LED_PIN, LOW);
+    motorRotate.setMaxSpeed(speed);
+    motorLower.setMaxSpeed(speed);
+    motorHigher.setMaxSpeed(speed);
   }
+  //take it in account 
+
+  instruction.containsKey("Acceleration");
+  //take it in account 
+  
+  if (instruction.containsKey("Position"))
+  {
+    if (instruction["Position"].containsKey("Rz"))
+    {
+      positionMotors[0] = instruction["Position"]["Rz"].as<float>()*STEP_PER_DEGREE_ROTATION;
+    }
+    if (instruction["Position"].containsKey("Ry1"))
+    {
+      positionMotors[1] = instruction["Position"]["Ry1"].as<float>() * STEP_PER_DEGREE_LOWER;
+    }
+    if (instruction["Position"].containsKey("Ry2"))
+    {
+      positionMotors[2] = instruction["Position"]["Ry2"].as<float>() * STEP_PER_DEGREE_HIGHER;
+    }
+    if (instruction["Position"].containsKey("Gripper"))
+    {
+      positionMotors[3] = instruction["Position"]["Gripper"].as<float>();// * STEP_PER_DEGREE_HIGHER;
+    }
+    Serial.print("lecture de Rz : ");
+    Serial.println(positionMotors[0]);
+
+    allMotors.moveTo(positionMotors);
+  }
+}
+
+
+void setup() {
+  Serial.begin(9600);		//initialisation
+  Serial.println("initialisation ok");
+
+  motorRotate.setMaxSpeed(500);
+  motorLower.setMaxSpeed(500);
+  motorHigher.setMaxSpeed(500);
+  motorGripper.setMaxSpeed(500);
+
+  motorRotate.setAcceleration(50);
+  motorLower.setAcceleration(50);
+  motorHigher.setAcceleration(50);
+  motorGripper.setAcceleration(50);
+
+  motorRotate.setCurrentPosition(0);
+  motorLower.setCurrentPosition(45 * STEP_PER_DEGREE_LOWER); //change this angle
+  motorHigher.setCurrentPosition(5 * STEP_PER_DEGREE_HIGHER); //change this angle
+  motorGripper.setCurrentPosition(0); //change this angle
+  
+  allMotors.addStepper(motorRotate);
+  allMotors.addStepper(motorLower);
+  allMotors.addStepper(motorHigher);
+  allMotors.addStepper(motorGripper);
+
+  pinMode(ENABLE_PIN, OUTPUT);
+  digitalWrite(ENABLE_PIN, LOW);
+
+}
+
+void loop() {
+  if (!queueJson.isFull()) {            //if the queue is not full
+    if (receiveJson()) {    //get one more caracter from serial : is it end of line ?
+      Serial.println("ok"); 
+    }
+  }
+
+  //Serial.print(!allMotors.run());
+
+  if ((!allMotors.run()) && (!queueJson.isEmpty())) {  //run the motors. If it's finish and the queue is not empty, go the the next step
+    Serial.println("lecture du json suivant : "); 
+    executJson(queueJson.pop());  //loar the next element in the queue
+  }
+
+
+
+/*
+  String reception = "";
+  while (!Serial.available());
+  while (Serial.available()) { 	//tant que des données sont en attente
+    char c = Serial.read(); 	// lecture
+    reception += String(c); 	//on ajoute à l'objet réception
+    //delay(10); 		//petite attente
+  }
+  reception.trim(); 	//on enlève le superflu en début et fin de chaîne
+
+  JsonObject jsonRecu = JsonObject.parse(reception);
+  
+
+  JsonObject jsonReponse;
+  double val1 = double(jsonRecu["Rz"]);
+  if(val1 == 10){
+    //digitalWrite(D13, HIGH);
+  }
+  else{
+    //digitalWrite(D13, LOW);
+  }*/
+
+  
 }
