@@ -64,7 +64,7 @@ bool receiveJson(){
 void executJson(JsonObject instruction)
 {
   if(instruction.containsKey("SpeedMax")){
-    int speed = instruction["SpeedMax"].as<int>();
+    int speed = 2000;//instruction["SpeedMax"].as<int>();
     Serial.print("detection de speed : ");
     Serial.println(speed);
     
@@ -81,19 +81,19 @@ void executJson(JsonObject instruction)
   {
     if (instruction["Position"].containsKey("Rz"))
     {
-      positionMotors[0] = instruction["Position"]["Rz"].as<float>()*STEP_PER_DEGREE_ROTATION;
+      positionMotors[0] = instruction["Position"]["Rz"].as<int>()/10.*STEP_PER_DEGREE_ROTATION;
     }
     if (instruction["Position"].containsKey("Ry1"))
     {
-      positionMotors[1] = instruction["Position"]["Ry1"].as<float>() * STEP_PER_DEGREE_LOWER;
+      positionMotors[1] = instruction["Position"]["Ry1"].as<int>() /10. * STEP_PER_DEGREE_LOWER;
     }
     if (instruction["Position"].containsKey("Ry2"))
     {
-      positionMotors[2] = instruction["Position"]["Ry2"].as<float>() * STEP_PER_DEGREE_HIGHER;
+      positionMotors[2] = instruction["Position"]["Ry2"].as<int>() /10. * STEP_PER_DEGREE_HIGHER;
     }
     if (instruction["Position"].containsKey("Gripper"))
     {
-      positionMotors[3] = instruction["Position"]["Gripper"].as<float>();// * STEP_PER_DEGREE_HIGHER;
+      positionMotors[3] = instruction["Position"]["Gripper"].as<int>() /10.;// * STEP_PER_DEGREE_HIGHER;
     }
     Serial.print("lecture de Rz : ");
     Serial.println(positionMotors[0]);
