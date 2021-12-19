@@ -139,36 +139,9 @@ void loop() {
     }
   }
 
-  //Serial.print(!allMotors.run());
-
   if ((!allMotors.run()) && (!queueJson.isEmpty())) {  //run the motors. If it's finish and the queue is not empty, go the the next step
     Serial.println("lecture du json suivant : "); 
     executJson(queueJson.pop());  //loar the next element in the queue
   }
-
-
-
-/*
-  String reception = "";
-  while (!Serial.available());
-  while (Serial.available()) { 	//tant que des données sont en attente
-    char c = Serial.read(); 	// lecture
-    reception += String(c); 	//on ajoute à l'objet réception
-    //delay(10); 		//petite attente
-  }
-  reception.trim(); 	//on enlève le superflu en début et fin de chaîne
-
-  JsonObject jsonRecu = JsonObject.parse(reception);
-  
-
-  JsonObject jsonReponse;
-  double val1 = double(jsonRecu["Rz"]);
-  if(val1 == 10){
-    //digitalWrite(D13, HIGH);
-  }
-  else{
-    //digitalWrite(D13, LOW);
-  }*/
-
   
 }
